@@ -57,8 +57,7 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
             $clientPhone,
             $secret,
             $formUrl,
-            $secret,
-            $serviceName
+            $secret
         );
 
         $this->buildFiscalCart($cart, $address);
@@ -68,7 +67,7 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
         $orderId = $this->createOrder($cart);
         $this->orderParams['orderid'] = $orderId;
 
-        $payload = $this->buildPaymentPayload($clientId, $clientPhone, $clientEmail, $orderId, $secret, $formUrl);
+        $payload = $this->buildPaymentPayload($clientId, $clientPhone, $clientEmail, $orderId, $serviceName, $secret);
 
         $this->context->smarty->assign([
             'paykeeperAction' => $formUrl,
@@ -191,8 +190,14 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
     /**
      * @return array<string, string>
      */
-    private function buildPaymentPayload(string $clientId, string $clientPhone, string $clientEmail, int $orderId, string $secret, string $formUrl): array
-    {
+    private function buildPaymentPayload(
+        string $clientId,
+        string $clientPhone,
+        string $clientEmail,
+        int $orderId,
+        string $serviceName,
+        string $secret
+    ): array {
         $fiscalCart = json_encode($this->fiscalCart, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION) ?: '';
         $orderTotal = number_format($this->orderTotal, 2, '.', '');
 
@@ -213,10 +218,9 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
             'orderid' => $orderId,
             'client_phone' => $clientPhone,
             'client_email' => $clientEmail,
-            'service_name' => $this->orderParams['display_service_name'],
+            'service_name' => $serviceName,
             'cart' => $fiscalCart,
             'sign' => $sign,
-            'url' => $formUrl,
         ];
     }
 
@@ -305,8 +309,7 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
         string $clientPhone,
         string $serviceName,
         string $formUrl,
-        string $secretKey,
-        string $displayServiceName
+        string $secretKey
     ): void {
         $this->orderTotal = $orderTotal;
         $this->orderParams = [
