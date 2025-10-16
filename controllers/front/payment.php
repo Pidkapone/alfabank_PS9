@@ -59,6 +59,9 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
             $formUrl,
             $secret,
             $serviceName
+            $secret,
+            $formUrl,
+            $secret
         );
 
         $this->buildFiscalCart($cart, $address);
@@ -69,6 +72,7 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
         $this->orderParams['orderid'] = $orderId;
 
         $payload = $this->buildPaymentPayload($clientId, $clientPhone, $clientEmail, $orderId);
+        $payload = $this->buildPaymentPayload($clientId, $clientPhone, $clientEmail, $orderId, $serviceName, $secret);
 
         $this->context->smarty->assign([
             'paykeeperAction' => $formUrl,
@@ -250,6 +254,92 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
 
     private function applyDiscounts(bool $discountEnabled): void
     {
+        );
+
+        $this->deliveryIndex = count($this->fiscalCart) - 1;
+    }
+
+    private function createOrder(Cart $cart): int
+    {
+        $this->module->validateOrder(
+            (int) $cart->id,
+            (int) Configuration::get(Paykeeper::CONFIG_STATE_BEFORE, null),
+            (float) $this->orderTotal,
+            $this->module->displayName,
+            $this->module->l('Redirected to PayKeeper payment page, awaiting confirmation from the bank.', 'payment'),
+            [],
+            null,
+            false,
+            $cart->secure_key
+        );
+
+        return (int) Order::getOrderByCartId((int) $cart->id);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function buildPaymentPayload(
+        string $clientId,
+        string $clientPhone,
+        string $clientEmail,
+        int $orderId,
+        string $serviceName,
+        string $secret
+    ): array {
+        $fiscalCart = json_encode($this->fiscalCart, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION) ?: '';
+        $orderTotal = number_format($this->orderTotal, 2, '.', '');
+
+        $sign = hash(
+            'sha256',
+            $orderTotal
+            . $clientId
+            . (string) $orderId
+            . $this->orderParams['service_name']
+            . $clientEmail
+            . $clientPhone
+            . $secret
+        );
+
+        return [
+            'sum' => $orderTotal,
+            'clientid' => $clientId,
+            'orderid' => $orderId,
+            'client_phone' => $clientPhone,
+            'client_email' => $clientEmail,
+            'service_name' => $serviceName,
+            'cart' => $fiscalCart,
+            'sign' => $sign,
+        ];
+    }
+
+    private function updateFiscalCart(
+        string $formType,
+        string $name,
+        float $price,
+        int $quantity,
+        float $sum,
+        string $tax,
+        string $itemType = 'goods',
+        string $paymentType = 'prepay'
+    ): void {
+        if ($formType === 'create') {
+            $name = str_replace(["\n ", "\r "], '', $name);
+        }
+
+        $this->fiscalCart[] = [
+            'name' => $name,
+            'price' => number_format($price, 2, '.', ''),
+            'quantity' => $quantity,
+            'sum' => number_format($sum, 2, '.', ''),
+            'tax' => $tax,
+            'item_type' => $itemType,
+            'payment_type' => $paymentType,
+        ];
+    }
+
+    private function applyDiscounts(bool $discountEnabled): void
+    {
         if (!$discountEnabled) {
             return;
         }
@@ -310,6 +400,7 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
         string $formUrl,
         string $secretKey,
         string $displayServiceName
+        string $secretKey
     ): void {
         $this->orderTotal = $orderTotal;
         $this->orderParams = [
