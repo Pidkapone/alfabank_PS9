@@ -23,19 +23,6 @@ class Paykeeper extends PaymentModule
     public const CONFIG_STATE_AFTER = 'STATE_AFTER_PAYMENT';
     public const CONFIG_FORCE_DISCOUNT = 'FORCE_DISCOUNT_CHECK';
 
-    private const DEFAULT_FORM_URL = 'http://planetofstones.server.paykeeper.ru/create';
-    private const DEFAULT_SECRET_WORD = '2]yGy2-W.G5gCOoKd';
-
-    public static function getDefaultFormUrl(): string
-    {
-        return self::DEFAULT_FORM_URL;
-    }
-
-    public static function getDefaultSecretWord(): string
-    {
-        return self::DEFAULT_SECRET_WORD;
-    }
-
     /**
      * @var array<int, string>
      */
@@ -126,8 +113,8 @@ class Paykeeper extends PaymentModule
 
     private function setDefaultConfiguration(): bool
     {
-        Configuration::updateValue(self::CONFIG_URL, self::DEFAULT_FORM_URL);
-        Configuration::updateValue(self::CONFIG_SECRET, self::DEFAULT_SECRET_WORD);
+        Configuration::updateValue(self::CONFIG_URL, '');
+        Configuration::updateValue(self::CONFIG_SECRET, '');
         Configuration::updateValue(self::CONFIG_STATE_BEFORE, (int) Configuration::get('PS_OS_PAYMENT', null));
         Configuration::updateValue(self::CONFIG_STATE_AFTER, (int) Configuration::get('PS_OS_PAYMENT', null));
         Configuration::updateValue(self::CONFIG_FORCE_DISCOUNT, 0);
