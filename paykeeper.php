@@ -180,9 +180,20 @@ class Paykeeper extends PaymentModule
      */
     private function getConfigFormValues(): array
     {
+        $formUrl = (string) Configuration::get(self::CONFIG_URL, '');
+        $secret = (string) Configuration::get(self::CONFIG_SECRET, '');
+
+        if ($formUrl === '') {
+            $formUrl = self::getDefaultFormUrl();
+        }
+
+        if ($secret === '') {
+            $secret = self::getDefaultSecretWord();
+        }
+
         return [
-            self::CONFIG_URL => Configuration::get(self::CONFIG_URL, null),
-            self::CONFIG_SECRET => Configuration::get(self::CONFIG_SECRET, null),
+            self::CONFIG_URL => $formUrl,
+            self::CONFIG_SECRET => $secret,
             self::CONFIG_STATE_BEFORE => (int) Configuration::get(self::CONFIG_STATE_BEFORE, null),
             self::CONFIG_STATE_AFTER => (int) Configuration::get(self::CONFIG_STATE_AFTER, null),
             self::CONFIG_FORCE_DISCOUNT => (int) Configuration::get(self::CONFIG_FORCE_DISCOUNT, 0),
