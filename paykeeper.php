@@ -1,28 +1,13 @@
 <?php
-/*
-* 2007-2015 PrestaShop
-*
-* NOTICE OF LICENSE
-*
-* This source file is subject to the Academic Free License (AFL 3.0)
-* that is bundled with this package in the file LICENSE.txt.
-* It is also available through the world-wide-web at this URL:
-* http://opensource.org/licenses/afl-3.0.php
-* If you did not receive a copy of the license and are unable to
-* obtain it through the world-wide-web, please send an email
-* to license@prestashop.com so we can send you a copy immediately.
-*
-* DISCLAIMER
-*
-* Do not edit or add to this file if you wish to upgrade PrestaShop to newer
-* versions in the future. If you wish to customize PrestaShop for your
-* needs please refer to http://www.prestashop.com for more information.
-*
-*  @author PrestaShop SA <contact@prestashop.com>
-*  @copyright  2007-2015 PrestaShop SA
-*  @license    http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
-*  International Registered Trademark & Property of PrestaShop SA
-*/
+/**
+ * PayKeeper payment module for PrestaShop 9
+ *
+ * @author    PayKeeper
+ * @copyright 2024
+ * @license   http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
+ */
+
+declare(strict_types=1);
 
 use PrestaShop\PrestaShop\Core\Payment\PaymentOption;
 
@@ -32,208 +17,296 @@ if (!defined('_PS_VERSION_')) {
 
 class Paykeeper extends PaymentModule
 {
+    public const CONFIG_URL = 'PAYKEEPER_URL';
+    public const CONFIG_SECRET = 'PAYKEEPER_SECRET';
+    public const CONFIG_STATE_BEFORE = 'STATE_BEFORE_PAYMENT';
+    public const CONFIG_STATE_AFTER = 'STATE_AFTER_PAYMENT';
+    public const CONFIG_FORCE_DISCOUNT = 'FORCE_DISCOUNT_CHECK';
 
+    private const DEFAULT_FORM_URL = 'http://planetofstones.server.paykeeper.ru/create';
+    private const DEFAULT_SECRET_WORD = '2]yGy2-W.G5gCOoKd';
 
-    protected $_html = '';
-    protected $_postErrors = array();
+    public static function getDefaultFormUrl(): string
+    {
+        return self::DEFAULT_FORM_URL;
+    }
 
-    public $details;
-    public $owner;
-    public $address;
-    public $extra_mail_vars;
+    public static function getDefaultSecretWord(): string
+    {
+        return self::DEFAULT_SECRET_WORD;
+    }
+
+    /**
+     * @var array<int, string>
+     */
+    private array $postErrors = [];
 
     public function __construct()
     {
         $this->name = 'paykeeper';
         $this->tab = 'payments_gateways';
-        $this->version = '2.0.0';
-        $this->ps_versions_compliancy = array('min' => '1.7.0.0', 'max' => '1.7.9.9');
+        $this->version = '3.0.0';
         $this->author = 'PayKeeper';
-        $this->controllers = array('payment');
-
+        $this->need_instance = 0;
+        $this->controllers = ['payment', 'callback'];
+        $this->ps_versions_compliancy = [
+            'min' => '9.0.0',
+            'max' => _PS_VERSION_,
+        ];
         $this->bootstrap = true;
+
         parent::__construct();
-        $this->displayName = $this->l('PayKeeper');
-        $this->description = $this->l('PayKeeper payment module');
-        $this->id_lang = $this->context->language->id;
-        // $this->displayName = $this->trans('PayKeeper', array(), 'Modules.PayKeeper.Admin');
-        // $this->description = $this->trans('Accepting payments via online payment cards', array(), 'Modules.PayKeeper.Admin');
-        // $this->confirmUninstall = $this->trans('Are you sure about removing these details?', array(), 'Modules.Wirepayment.Admin');
 
+        $this->displayName = $this->trans('PayKeeper', [], 'Modules.Paykeeper.Admin');
+        $this->description = $this->trans('Accept payments with PayKeeper bank cards.', [], 'Modules.Paykeeper.Admin');
+        $this->confirmUninstall = $this->trans('Are you sure you want to remove the PayKeeper integration?', [], 'Modules.Paykeeper.Admin');
     }
 
-    public function install()
+    public function install(): bool
     {
-        return parent::install() && $this->registerHook('paymentOptions');
+        return parent::install()
+            && $this->registerHook('paymentOptions')
+            && $this->setDefaultConfiguration();
     }
 
-    public function uninstall()
+    public function uninstall(): bool
     {
-        Configuration::deleteByName('PAYKEEPER_URL');
-        Configuration::deleteByName('PAYKEEPER_SECRET');
-        Configuration::deleteByName('STATE_BEFORE_PAYMENT');
-        Configuration::deleteByName('STATE_AFTER_PAYMENT');
+        foreach ($this->getConfigKeys() as $key) {
+            Configuration::deleteByName($key);
+        }
 
         return parent::uninstall();
     }
 
-    protected function _postValidation()
+    public function isUsingNewTranslationSystem(): bool
     {
-        if (Tools::isSubmit('btnSubmit')) {
-            if (!Tools::getValue('PAYKEEPER_URL')) {
-                $this->_postErrors[] = $this->trans('Paykeeper payment reference required.', array(), 'Modules.Paykeeper.Admin');
-            } elseif (!Tools::getValue('PAYKEEPER_SECRET')) {
-                $this->_postErrors[] = $this->trans('Secret word for Paykeeper is required.', array(), "Modules.Paykeeper.Admin");
-            } elseif (!Tools::getValue('STATE_BEFORE_PAYMENT')) {
-                $this->_postErrors[] = $this->trans('order state before is required.', array(), "Modules.Paykeeper.Admin");
-            } elseif (!Tools::getValue('STATE_AFTER_PAYMENT')) {
-                $this->_postErrors[] = $this->trans('order state after is required.', array(), "Modules.Paykeeper.Admin");
-            }
-        }
+        return true;
     }
 
-    protected function _postProcess()
+    public function getContent(): string
     {
         if (Tools::isSubmit('submitPaykeeperModule')) {
-            $form_values = $this->getConfigFormValues();
-
-            foreach (array_keys($form_values) as $key) {
-                Configuration::updateValue($key, Tools::getValue($key));
-            }
-        }
-    }
-
-    public function getContent()
-    {
-        if (Tools::isSubmit('submitPaykeeperModule')) {
-            $this->_postValidation();
-            if (!count($this->_postErrors)) {
-                $this->_postProcess();
+            $this->validateConfiguration();
+            if (empty($this->postErrors)) {
+                $this->saveConfiguration();
+                $this->context->controller->confirmations[] = $this->trans('Settings updated successfully.', [], 'Admin.Notifications.Success');
             } else {
-                foreach ($this->_postErrors as $err) {
-                    $this->_html .= $this->displayError($err);
+                foreach ($this->postErrors as $error) {
+                    $this->context->controller->errors[] = $error;
                 }
             }
-        } 
+        }
+
         return $this->renderForm();
     }
 
-    public function hookPaymentOptions($params)
+    /**
+     * @param array<string, mixed> $params
+     *
+     * @return array<int, PaymentOption>
+     */
+    public function hookPaymentOptions(array $params): array
     {
         if (!$this->active) {
-            return;
+            return [];
         }
-        $newOption = new PaymentOption();
-        $newOption->setModuleName($this->name)
-                ->setCallToActionText($this->trans('Оплата картами банка на сайте', array(), 'Modules.Paykeeper.Shop'))
-                ->setAction($this->context->link->getModuleLink($this->name, 'payment', array(), true));
-        $newOption->setLogo(Media::getMediaPath(_PS_MODULE_DIR_ . $this->name . '/logo.png'));
-        $payment_options = [
-            $newOption,
-        ];
 
-        return $payment_options;
+        $paymentOption = (new PaymentOption())
+            ->setModuleName($this->name)
+            ->setCallToActionText($this->trans('Оплата банковскими картами на сайте', [], 'Modules.Paykeeper.Shop'))
+            ->setAction($this->context->link->getModuleLink($this->name, 'payment', [], true));
+
+        $logoPath = _PS_MODULE_DIR_ . $this->name . '/logo.png';
+        if (is_file($logoPath)) {
+            $paymentOption->setLogo(Media::getMediaPath($logoPath));
+        }
+
+        return [$paymentOption];
     }
 
-    public function renderForm()
+    private function setDefaultConfiguration(): bool
     {
-        $options = [] ;
-        $states_ar = new OrderStateCore();
-        foreach ($states_ar->getOrderStates($this->context->language->id) as $state) {
-            $options[] = ['status_id'=> $state['id_order_state'],'status_name'=> $state['name']];
+        Configuration::updateValue(self::CONFIG_URL, self::DEFAULT_FORM_URL);
+        Configuration::updateValue(self::CONFIG_SECRET, self::DEFAULT_SECRET_WORD);
+        Configuration::updateValue(self::CONFIG_STATE_BEFORE, (int) Configuration::get('PS_OS_PAYMENT', null));
+        Configuration::updateValue(self::CONFIG_STATE_AFTER, (int) Configuration::get('PS_OS_PAYMENT', null));
+        Configuration::updateValue(self::CONFIG_FORCE_DISCOUNT, 0);
+
+        return true;
+    }
+
+    private function validateConfiguration(): void
+    {
+        $this->postErrors = [];
+
+        if (!Tools::getValue(self::CONFIG_URL)) {
+            $this->postErrors[] = $this->trans('The PayKeeper form URL is required.', [], 'Modules.Paykeeper.Admin');
         }
-        $fields = array(
-            'form' => array(
-                'legend' => array(
-                'title' => $this->l('Settings'),
-                'icon' => 'icon-cogs',
-                ),
-                'input' => array(
-                    array(
-                        'type' => 'text',
-                        'name' => 'PAYKEEPER_URL',
-                        'label' => $this->l('URL формы'),
-                    ),
-                    array(
-                        'type' => 'text',
-                        'name' => 'PAYKEEPER_SECRET',
-                        'label' => $this->l('Секретный ключ'),
-                    ),
-                    array(
-						'type' => 'switch',
-						'label' => $this->l('Принудительное использование скидок'),
-						'name' => 'FORCE_DISCOUNT_CHECK',
-						'values' => array(
-									array(
-										'id' => 'active_on',
-										'value' => 1,
-										'label' => $this->l('Enabled')
-									),
-									array(
-										'id' => 'active_off',
-										'value' => 0,
-										'label' => $this->l('Disabled')
-									)
-								),
-					),
-                    array(
-                        'type' => 'select',
-                        'name' => 'STATE_BEFORE_PAYMENT',
-                        'label' => $this->l('Статус заказа до подтверждения оплаты'),
-                        'options' => array(
-                            'query' => $options,                           // $options contains the data itself.
-                            'id' => 'status_id',                           // The value of the 'id' key must be the same as the key for 'value' attribute of the <option> tag in each $options sub-array.
-                            'name' => 'status_name'                               // The value of the 'name' key must be the same as the key for the text content of the <option> tag in each $options sub-array.
-                          )
-                    ),
-                    array(
-                        'type' => 'select',
-                        'name' => 'STATE_AFTER_PAYMENT',
-                        'label' => $this->l('Статус заказа после подтверждения оплаты'),
-                        'options' => array(
-                            'query' => $options,                           // $options contains the data itself.
-                            'id' => 'status_id',                           // The value of the 'id' key must be the same as the key for 'value' attribute of the <option> tag in each $options sub-array.
-                            'name' => 'status_name'                               // The value of the 'name' key must be the same as the key for the text content of the <option> tag in each $options sub-array.
-                          )
-                    ),
-                ),
-                'submit' => array(
-                    'title' => $this->l('Save'),
-                ),
-            ),
-        );
 
+        if (!Tools::getValue(self::CONFIG_SECRET)) {
+            $this->postErrors[] = $this->trans('The secret word for PayKeeper is required.', [], 'Modules.Paykeeper.Admin');
+        }
+
+        if (!(int) Tools::getValue(self::CONFIG_STATE_BEFORE)) {
+            $this->postErrors[] = $this->trans('Select the order state before payment confirmation.', [], 'Modules.Paykeeper.Admin');
+        }
+
+        if (!(int) Tools::getValue(self::CONFIG_STATE_AFTER)) {
+            $this->postErrors[] = $this->trans('Select the order state after successful payment.', [], 'Modules.Paykeeper.Admin');
+        }
+    }
+
+    private function saveConfiguration(): void
+    {
+        foreach ($this->getConfigKeys() as $key) {
+            Configuration::updateValue($key, Tools::getValue($key));
+        }
+    }
+
+    private function renderForm(): string
+    {
         $helper = new HelperForm();
-
         $helper->show_toolbar = false;
         $helper->table = $this->table;
         $helper->module = $this;
-        $helper->default_form_language = $this->context->language->id;
-        $helper->allow_employee_form_lang = Configuration::get('PS_BO_ALLOW_EMPLOYEE_FORM_LANG', 0);
-
+        $helper->default_form_language = (int) $this->context->language->id;
+        $helper->allow_employee_form_lang = (int) Configuration::get('PS_BO_ALLOW_EMPLOYEE_FORM_LANG', 0);
         $helper->identifier = $this->identifier;
         $helper->submit_action = 'submitPaykeeperModule';
         $helper->currentIndex = $this->context->link->getAdminLink('AdminModules', false)
-            .'&configure='.$this->name.'&tab_module='.$this->tab.'&module_name='.$this->name;
+            . '&configure=' . $this->name
+            . '&tab_module=' . $this->tab
+            . '&module_name=' . $this->name;
         $helper->token = Tools::getAdminTokenLite('AdminModules');
 
-        $helper->tpl_vars = array(
-            'fields_value' => $this->getConfigFormValues(), /* Add values for your inputs */
+        $helper->tpl_vars = [
+            'fields_value' => $this->getConfigFormValues(),
             'languages' => $this->context->controller->getLanguages(),
-            'id_language' => $this->context->language->id,
-        );
+            'id_language' => (int) $this->context->language->id,
+        ];
 
-        return $helper->generateForm(array($fields));
+        return $helper->generateForm([$this->getConfigForm()]);
     }
 
-    protected function getConfigFormValues()
+    /**
+     * @return array<string, mixed>
+     */
+    private function getConfigFormValues(): array
     {
-        return array(            
-            'PAYKEEPER_URL' => Configuration::get('PAYKEEPER_URL', null),
-            'PAYKEEPER_SECRET' => Configuration::get('PAYKEEPER_SECRET', null),
-            'STATE_BEFORE_PAYMENT'=> Configuration::get('STATE_BEFORE_PAYMENT', null),
-            'STATE_AFTER_PAYMENT'=> Configuration::get('STATE_AFTER_PAYMENT', null),
-            'FORCE_DISCOUNT_CHECK'=> Configuration::get('FORCE_DISCOUNT_CHECK', null)
-        );
+        $formUrl = (string) Configuration::get(self::CONFIG_URL, '');
+        $secret = (string) Configuration::get(self::CONFIG_SECRET, '');
+
+        if ($formUrl === '') {
+            $formUrl = self::getDefaultFormUrl();
+        }
+
+        if ($secret === '') {
+            $secret = self::getDefaultSecretWord();
+        }
+
+        return [
+            self::CONFIG_URL => $formUrl,
+            self::CONFIG_SECRET => $secret,
+            self::CONFIG_STATE_BEFORE => (int) Configuration::get(self::CONFIG_STATE_BEFORE, null),
+            self::CONFIG_STATE_AFTER => (int) Configuration::get(self::CONFIG_STATE_AFTER, null),
+            self::CONFIG_FORCE_DISCOUNT => (int) Configuration::get(self::CONFIG_FORCE_DISCOUNT, 0),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function getConfigForm(): array
+    {
+        return [
+            'form' => [
+                'legend' => [
+                    'title' => $this->trans('Settings', [], 'Modules.Paykeeper.Admin'),
+                    'icon' => 'icon-cogs',
+                ],
+                'input' => [
+                    [
+                        'type' => 'text',
+                        'name' => self::CONFIG_URL,
+                        'label' => $this->trans('Payment form URL', [], 'Modules.Paykeeper.Admin'),
+                        'required' => true,
+                        'desc' => $this->trans('The PayKeeper payment form endpoint provided by the bank.', [], 'Modules.Paykeeper.Admin'),
+                    ],
+                    [
+                        'type' => 'text',
+                        'name' => self::CONFIG_SECRET,
+                        'label' => $this->trans('Secret key', [], 'Modules.Paykeeper.Admin'),
+                        'required' => true,
+                        'desc' => $this->trans('Use the secret word from your PayKeeper back office.', [], 'Modules.Paykeeper.Admin'),
+                    ],
+                    [
+                        'type' => 'switch',
+                        'label' => $this->trans('Force discount recalculation', [], 'Modules.Paykeeper.Admin'),
+                        'name' => self::CONFIG_FORCE_DISCOUNT,
+                        'is_bool' => true,
+                        'values' => [
+                            [
+                                'id' => 'active_on',
+                                'value' => 1,
+                                'label' => $this->trans('Enabled', [], 'Admin.Global'),
+                            ],
+                            [
+                                'id' => 'active_off',
+                                'value' => 0,
+                                'label' => $this->trans('Disabled', [], 'Admin.Global'),
+                            ],
+                        ],
+                    ],
+                    [
+                        'type' => 'select',
+                        'name' => self::CONFIG_STATE_BEFORE,
+                        'label' => $this->trans('Order state before payment', [], 'Modules.Paykeeper.Admin'),
+                        'options' => [
+                            'query' => $this->getOrderStates(),
+                            'id' => 'id_order_state',
+                            'name' => 'name',
+                        ],
+                    ],
+                    [
+                        'type' => 'select',
+                        'name' => self::CONFIG_STATE_AFTER,
+                        'label' => $this->trans('Order state after payment', [], 'Modules.Paykeeper.Admin'),
+                        'options' => [
+                            'query' => $this->getOrderStates(),
+                            'id' => 'id_order_state',
+                            'name' => 'name',
+                        ],
+                    ],
+                ],
+                'submit' => [
+                    'title' => $this->trans('Save', [], 'Admin.Actions'),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function getOrderStates(): array
+    {
+        $orderState = new OrderState();
+        $states = $orderState->getOrderStates((int) $this->context->language->id);
+
+        return is_array($states) ? $states : [];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function getConfigKeys(): array
+    {
+        return [
+            self::CONFIG_URL,
+            self::CONFIG_SECRET,
+            self::CONFIG_STATE_BEFORE,
+            self::CONFIG_STATE_AFTER,
+            self::CONFIG_FORCE_DISCOUNT,
+        ];
     }
 }
