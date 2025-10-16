@@ -321,6 +321,7 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
             'service_name' => $serviceName,
             'form_url' => $formUrl,
             'secret_key' => $secretKey,
+            'display_service_name' => $displayServiceName,
         ];
     }
 
