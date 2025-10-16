@@ -55,7 +55,7 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
             '',
             $clientEmail,
             $clientPhone,
-            $serviceName,
+            $secret,
             $formUrl,
             $secret
         );
@@ -67,7 +67,7 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
         $orderId = $this->createOrder($cart);
         $this->orderParams['orderid'] = $orderId;
 
-        $payload = $this->buildPaymentPayload($clientId, $clientPhone, $clientEmail, $orderId, $secret);
+        $payload = $this->buildPaymentPayload($clientId, $clientPhone, $clientEmail, $orderId, $serviceName, $secret);
 
         $this->context->smarty->assign([
             'paykeeperAction' => $formUrl,
@@ -190,8 +190,14 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
     /**
      * @return array<string, string>
      */
-    private function buildPaymentPayload(string $clientId, string $clientPhone, string $clientEmail, int $orderId, string $secret): array
-    {
+    private function buildPaymentPayload(
+        string $clientId,
+        string $clientPhone,
+        string $clientEmail,
+        int $orderId,
+        string $serviceName,
+        string $secret
+    ): array {
         $fiscalCart = json_encode($this->fiscalCart, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION) ?: '';
         $orderTotal = number_format($this->orderTotal, 2, '.', '');
 
@@ -212,7 +218,7 @@ class PaykeeperPaymentModuleFrontController extends ModuleFrontController
             'orderid' => $orderId,
             'client_phone' => $clientPhone,
             'client_email' => $clientEmail,
-            'service_name' => $this->orderParams['service_name'],
+            'service_name' => $serviceName,
             'cart' => $fiscalCart,
             'sign' => $sign,
         ];
